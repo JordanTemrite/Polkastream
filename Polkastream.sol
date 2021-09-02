@@ -6,32 +6,22 @@ import "./DividendPayingToken.sol";
 import "./SafeMath.sol";
 import "./IterableMapping.sol";
 import "./Ownable.sol";
-import "./IUniswapV2Pair.sol";
-import "./IUniswapV2Factory.sol";
-import "./IUniswapV2Router.sol";
 
 
 contract Polkastream is ERC20, Ownable {
     using SafeMath for uint256;
-
-    IUniswapV2Router02 public uniswapV2Router;
-    address public  uniswapV2Pair;
 
     bool private swapping;
 
     PolkastreamDividendTracker public dividendTracker;
 
     address public deadWallet = 0x000000000000000000000000000000000000dEaD;
-
-    uint256 public swapTokensAtAmount = 2000000 * (10**18);
     
     mapping(address => bool) public _isBlacklisted;
 
-    uint256 public PSTRRewardsFee = 7;
-    uint256 public burnFee = 3;
+    uint256 public PSTRRewardsFee = 3;
+    uint256 public burnFee = 1;
     uint256 public totalFees = PSTRRewardsFee.add(burnFee);
-
-    address public _marketingWalletAddress = 0x24e21EF2C3C9C93B5791d77cF934bF92a91276ba;
 
 
     // use by default 300,000 gas to process auto-claiming dividends
@@ -40,29 +30,12 @@ contract Polkastream is ERC20, Ownable {
      // exlcude from fees and max transaction amount
     mapping (address => bool) private _isExcludedFromFees;
 
-
-    // store addresses that a automatic market maker pairs. Any transfer *to* these addresses
-    // could be subject to a maximum transfer amount
-    mapping (address => bool) public automatedMarketMakerPairs;
-
     event UpdateDividendTracker(address indexed newAddress, address indexed oldAddress);
-
-    event UpdateUniswapV2Router(address indexed newAddress, address indexed oldAddress);
 
     event ExcludeFromFees(address indexed account, bool isExcluded);
     event ExcludeMultipleAccountsFromFees(address[] accounts, bool isExcluded);
 
-    event SetAutomatedMarketMakerPair(address indexed pair, bool indexed value);
-
-    event LiquidityWalletUpdated(address indexed newLiquidityWallet, address indexed oldLiquidityWallet);
-
     event GasForProcessingUpdated(uint256 indexed newValue, uint256 indexed oldValue);
-
-    event SwapAndLiquify(
-        uint256 tokensSwapped,
-        uint256 ethReceived,
-        uint256 tokensIntoLiqudity
-    );
 
     event SendDividends(
     	uint256 tokensSwapped,
@@ -78,31 +51,18 @@ contract Polkastream is ERC20, Ownable {
     	address indexed processor
     );
 
-    constructor() public ERC20("Polkastream", "PSTR") {
+    constructor() public ERC20("PSTEST", "PT1") {
 
     	dividendTracker = new PolkastreamDividendTracker();
-
-
-    	IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
-         // Create a uniswap pair for this new token
-        address _uniswapV2Pair = IUniswapV2Factory(_uniswapV2Router.factory())
-            .createPair(address(this), _uniswapV2Router.WETH());
-
-        uniswapV2Router = _uniswapV2Router;
-        uniswapV2Pair = _uniswapV2Pair;
-
-        _setAutomatedMarketMakerPair(_uniswapV2Pair, true);
 
         // exclude from receiving dividends
         dividendTracker.excludeFromDividends(address(dividendTracker));
         dividendTracker.excludeFromDividends(address(this));
         dividendTracker.excludeFromDividends(owner());
         dividendTracker.excludeFromDividends(deadWallet);
-        dividendTracker.excludeFromDividends(address(_uniswapV2Router));
 
         // exclude from paying fees or having max transaction amount
         excludeFromFees(owner(), true);
-        excludeFromFees(_marketingWalletAddress, true);
         excludeFromFees(address(this), true);
 
         /*
@@ -126,20 +86,10 @@ contract Polkastream is ERC20, Ownable {
         newDividendTracker.excludeFromDividends(address(newDividendTracker));
         newDividendTracker.excludeFromDividends(address(this));
         newDividendTracker.excludeFromDividends(owner());
-        newDividendTracker.excludeFromDividends(address(uniswapV2Router));
 
         emit UpdateDividendTracker(newAddress, address(dividendTracker));
 
         dividendTracker = newDividendTracker;
-    }
-
-    function updateUniswapV2Router(address newAddress) public onlyOwner {
-        require(newAddress != address(uniswapV2Router), "Polkastream: The router already has that address");
-        emit UpdateUniswapV2Router(newAddress, address(uniswapV2Router));
-        uniswapV2Router = IUniswapV2Router02(newAddress);
-        address _uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory())
-            .createPair(address(this), uniswapV2Router.WETH());
-        uniswapV2Pair = _uniswapV2Pair;
     }
 
     function excludeFromFees(address account, bool excluded) public onlyOwner {
@@ -157,49 +107,20 @@ contract Polkastream is ERC20, Ownable {
         emit ExcludeMultipleAccountsFromFees(accounts, excluded);
     }
 
-    function setMarketingWallet(address payable wallet) external onlyOwner{
-        _marketingWalletAddress = wallet;
-    }
-
     function setPSTRRewardsFee(uint256 value) external onlyOwner{
         PSTRRewardsFee = value;
-        totalFees = PSTRRewardsFee.add(liquidityFee);
+        totalFees = PSTRRewardsFee.add(burnFee);
     }
 
-    function setLiquiditFee(uint256 value) external onlyOwner{
-        liquidityFee = value;
-        totalFees = PSTRRewardsFee.add(liquidityFee);
-    }
+    function setBurnFee(uint256 value) external onlyOwner{
+        burnFee = value;
+        totalFees = PSTRRewardsFee.add(burnFee);
 
-    function setMarketingFee(uint256 value) external onlyOwner{
-        marketingFee = value;
-        totalFees = PSTRRewardsFee.add(liquidityFee);
-
-    }
-
-
-    function setAutomatedMarketMakerPair(address pair, bool value) public onlyOwner {
-        require(pair != uniswapV2Pair, "Polkastream: The PancakeSwap pair cannot be removed from automatedMarketMakerPairs");
-
-        _setAutomatedMarketMakerPair(pair, value);
     }
     
     function blacklistAddress(address account, bool value) external onlyOwner{
         _isBlacklisted[account] = value;
     }
-
-
-    function _setAutomatedMarketMakerPair(address pair, bool value) private {
-        require(automatedMarketMakerPairs[pair] != value, "Polkastream: Automated market maker pair is already set to that value");
-        automatedMarketMakerPairs[pair] = value;
-
-        if(value) {
-            dividendTracker.excludeFromDividends(pair);
-        }
-
-        emit SetAutomatedMarketMakerPair(pair, value);
-    }
-
 
     function updateGasForProcessing(uint256 newValue) public onlyOwner {
         require(newValue >= 200000 && newValue <= 500000, "Polkastream: gasForProcessing must be between 200,000 and 500,000");
@@ -293,33 +214,21 @@ contract Polkastream is ERC20, Ownable {
             super._transfer(from, to, 0);
             return;
         }
-
-		uint256 contractTokenBalance = balanceOf(address(this));
-
-        bool canSwap = contractTokenBalance >= swapTokensAtAmount;
-
-        if( canSwap &&
-            !swapping &&
-            !automatedMarketMakerPairs[from] &&
+        
+        if( !swapping &&
             from != owner() &&
             to != owner()
         ) {
             swapping = true;
 
-            uint256 marketingTokens = contractTokenBalance.mul(marketingFee).div(totalFees);
-            swapAndSendToFee(marketingTokens);
-
-            uint256 swapTokens = contractTokenBalance.mul(liquidityFee).div(totalFees);
-            swapAndLiquify(swapTokens);
-
-            uint256 sellTokens = balanceOf(address(this));
-            swapAndSendDividends(sellTokens);
+            uint256 feeTokens = balanceOf(address(this));
+            sendDividendsAndBurn(feeTokens);
 
             swapping = false;
         }
 
 
-        bool takeFee = !swapping;
+        bool takeFee = true;
 
         // if any account belongs to _isExcludedFromFee account then remove the fee
         if(_isExcludedFromFees[from] || _isExcludedFromFees[to]) {
@@ -328,9 +237,7 @@ contract Polkastream is ERC20, Ownable {
 
         if(takeFee) {
         	uint256 fees = amount.mul(totalFees).div(100);
-        	if(automatedMarketMakerPairs[to]){
-        	    fees += amount.mul(1).div(100);
-        	}
+        	
         	amount = amount.sub(fees);
 
             super._transfer(from, address(this), fees);
@@ -353,15 +260,22 @@ contract Polkastream is ERC20, Ownable {
         }
     }
 
-    function swapAndSendDividends(uint256 tokens) private{
-        swapTokensForCake(tokens);
-        uint256 dividends = IERC20(CAKE).balanceOf(address(this));
-        bool success = IERC20(CAKE).transfer(address(dividendTracker), dividends);
-
+    function sendDividendsAndBurn(uint256 tokens) private{
+        uint256 burnPercent = burnFee.div(totalFees).mul(100);
+        uint256 dividendPercent = PSTRRewardsFee.div(totalFees).mul(100);
+        uint256 burnAmount = balanceOf(address(this)).mul(burnPercent).div(100);
+        uint256 dividends = balanceOf(address(this)).mul(dividendPercent).div(100);
+        bool success = transferFrom(address(this), address(dividendTracker), dividends);
+        
         if (success) {
-            dividendTracker.distributeCAKEDividends(dividends);
+            _burn(address(this), burnAmount);
+            dividendTracker.distributePSTRDividends(dividends);
             emit SendDividends(tokens, dividends);
         }
+    }
+    
+    function setPSTR(address _PSTR) public onlyOwner {
+        dividendTracker.setPSTR(_PSTR);
     }
 }
 
@@ -572,4 +486,9 @@ contract PolkastreamDividendTracker is Ownable, DividendPayingToken {
 
     	return false;
     }
+    
+    function setPSTR(address _PSTR) public onlyOwner {
+        _setPSTR(_PSTR);
+    }
 }
+
