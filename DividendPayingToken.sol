@@ -75,7 +75,7 @@ contract DividendPayingToken is ERC20, Ownable, DividendPayingTokenInterface, Di
     if (_withdrawableDividend > 0) {
       withdrawnDividends[user] = withdrawnDividends[user].add(_withdrawableDividend);
       emit DividendWithdrawn(user, _withdrawableDividend);
-      bool success = _transfer(user, _withdrawableDividend);
+      bool success = super.transfer(user, _withdrawableDividend);
 
       if(!success) {
         withdrawnDividends[user] = withdrawnDividends[user].sub(_withdrawableDividend);
@@ -134,37 +134,11 @@ contract DividendPayingToken is ERC20, Ownable, DividendPayingTokenInterface, Di
     magnifiedDividendCorrections[to] = magnifiedDividendCorrections[to].sub(_magCorrection);
   }
 
-  /// @dev Internal function that mints tokens to an account.
-  /// Update magnifiedDividendCorrections to keep dividends unchanged.
-  /// @param account The account that will receive the created tokens.
-  /// @param value The amount that will be created.
-  function _mint(address account, uint256 value) internal override {
-    super._mint(account, value);
-
-    magnifiedDividendCorrections[account] = magnifiedDividendCorrections[account]
-      .sub( (magnifiedDividendPerShare.mul(value)).toInt256Safe() );
-  }
-
-  /// @dev Internal function that burns an amount of the token of a given account.
-  /// Update magnifiedDividendCorrections to keep dividends unchanged.
-  /// @param account The account whose tokens will be burnt.
-  /// @param value The amount that will be burnt.
-  function _burn(address account, uint256 value) internal override {
-    super._burn(account, value);
-
-    magnifiedDividendCorrections[account] = magnifiedDividendCorrections[account]
-      .add( (magnifiedDividendPerShare.mul(value)).toInt256Safe() );
-  }
-
-  function _setBalance(address account, uint256 newBalance) internal {
+  function _setBalance(address account, uint256 newBalance) view internal {
     uint256 currentBalance = balanceOf(account);
 
     if(newBalance > currentBalance) {
-      uint256 mintAmount = newBalance.sub(currentBalance);
-      _mint(account, mintAmount);
     } else if(newBalance < currentBalance) {
-      uint256 burnAmount = currentBalance.sub(newBalance);
-      _burn(account, burnAmount);
     }
   }
 }
