@@ -7,7 +7,6 @@ import "./SafeMath.sol";
 import "./IterableMapping.sol";
 import "./Ownable.sol";
 
-
 contract Polkastream is ERC20, Ownable {
     using SafeMath for uint256;
 
@@ -16,6 +15,8 @@ contract Polkastream is ERC20, Ownable {
     PolkastreamDividendTracker public dividendTracker;
 
     address public deadWallet = 0x000000000000000000000000000000000000dEaD;
+    
+    address public _dividendProcessingWallet = 0xB14601EF238417d347Dc7DB1d236411588392774;
     
     mapping(address => bool) public _isBlacklisted;
 
@@ -37,21 +38,7 @@ contract Polkastream is ERC20, Ownable {
 
     event GasForProcessingUpdated(uint256 indexed newValue, uint256 indexed oldValue);
 
-    event SendDividends(
-    	uint256 tokensSwapped,
-    	uint256 amount
-    );
-
-    event ProcessedDividendTracker(
-    	uint256 iterations,
-    	uint256 claims,
-        uint256 lastProcessedIndex,
-    	bool indexed automatic,
-    	uint256 gas,
-    	address indexed processor
-    );
-
-    constructor() public ERC20("PSTEST", "PT1") {
+    constructor() public ERC20("Polkastream", "PSTR") {
 
     	dividendTracker = new PolkastreamDividendTracker();
 
@@ -64,6 +51,7 @@ contract Polkastream is ERC20, Ownable {
         // exclude from paying fees or having max transaction amount
         excludeFromFees(owner(), true);
         excludeFromFees(address(this), true);
+        excludeFromFees(_dividendProcessingWallet, true);
 
         /*
             _mint is an internal function in ERC20.sol that is only called here,
@@ -75,7 +63,16 @@ contract Polkastream is ERC20, Ownable {
     receive() external payable {
 
   	}
-
+  	
+  	function setDividendProcessingWallet(address payable wallet) external onlyOwner {
+        _dividendProcessingWallet = wallet;
+        dividendTracker.setDividendProcessingWallet(wallet);
+    }
+  	
+  	function setPSTR(address _PSTR) public onlyOwner {
+  	    dividendTracker.setPSTR(_PSTR);
+  	}
+  	
     function updateDividendTracker(address newAddress) public onlyOwner {
         require(newAddress != address(dividendTracker), "Polkastream: The dividend tracker already has that address");
 
@@ -115,11 +112,6 @@ contract Polkastream is ERC20, Ownable {
     function setBurnFee(uint256 value) external onlyOwner{
         burnFee = value;
         totalFees = PSTRRewardsFee.add(burnFee);
-
-    }
-    
-    function blacklistAddress(address account, bool value) external onlyOwner{
-        _isBlacklisted[account] = value;
     }
 
     function updateGasForProcessing(uint256 newValue) public onlyOwner {
@@ -129,68 +121,13 @@ contract Polkastream is ERC20, Ownable {
         gasForProcessing = newValue;
     }
 
-    function updateClaimWait(uint256 claimWait) external onlyOwner {
-        dividendTracker.updateClaimWait(claimWait);
-    }
-
-    function getClaimWait() external view returns(uint256) {
-        return dividendTracker.claimWait();
-    }
-
-    function getTotalDividendsDistributed() external view returns (uint256) {
-        return dividendTracker.totalDividendsDistributed();
-    }
-
     function isExcludedFromFees(address account) public view returns(bool) {
         return _isExcludedFromFees[account];
     }
 
-    function withdrawableDividendOf(address account) public view returns(uint256) {
-    	return dividendTracker.withdrawableDividendOf(account);
-  	}
-
-	function dividendTokenBalanceOf(address account) public view returns (uint256) {
-		return dividendTracker.balanceOf(account);
-	}
-
 	function excludeFromDividends(address account) external onlyOwner{
 	    dividendTracker.excludeFromDividends(account);
 	}
-
-    function getAccountDividendsInfo(address account)
-        external view returns (
-            address,
-            int256,
-            int256,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256) {
-        return dividendTracker.getAccount(account);
-    }
-
-	function getAccountDividendsInfoAtIndex(uint256 index)
-        external view returns (
-            address,
-            int256,
-            int256,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256) {
-    	return dividendTracker.getAccountAtIndex(index);
-    }
-
-	function processDividendTracker(uint256 gas) external {
-		(uint256 iterations, uint256 claims, uint256 lastProcessedIndex) = dividendTracker.process(gas);
-		emit ProcessedDividendTracker(iterations, claims, lastProcessedIndex, false, gas, tx.origin);
-    }
-
-    function claim() external {
-		dividendTracker.processAccount(msg.sender, false);
-    }
 
     function getLastProcessedIndex() external view returns(uint256) {
     	return dividendTracker.getLastProcessedIndex();
@@ -214,21 +151,8 @@ contract Polkastream is ERC20, Ownable {
             super._transfer(from, to, 0);
             return;
         }
-        
-        if( !swapping &&
-            from != owner() &&
-            to != owner()
-        ) {
-            swapping = true;
 
-            uint256 feeTokens = balanceOf(address(this));
-            sendDividendsAndBurn(feeTokens);
-
-            swapping = false;
-        }
-
-
-        bool takeFee = true;
+        bool takeFee = !swapping;
 
         // if any account belongs to _isExcludedFromFee account then remove the fee
         if(_isExcludedFromFees[from] || _isExcludedFromFees[to]) {
@@ -237,10 +161,20 @@ contract Polkastream is ERC20, Ownable {
 
         if(takeFee) {
         	uint256 fees = amount.mul(totalFees).div(100);
-        	
-        	amount = amount.sub(fees);
 
-            super._transfer(from, address(this), fees);
+        	amount = amount.sub(fees);
+        	
+        	uint256 burnPercentage = totalFees.div(burnFee);
+        	uint256 burnAmount = fees.div(burnPercentage);
+        	uint256 rewardAmount = fees.sub(burnAmount);
+
+            super._transfer(from, address(this), burnAmount);
+            super.transfer(_dividendProcessingWallet, rewardAmount);
+            
+            burnPSTRFee();
+            
+            sendPSTRDividends();
+            
         }
 
         super._transfer(from, to, amount);
@@ -248,34 +182,17 @@ contract Polkastream is ERC20, Ownable {
         try dividendTracker.setBalance(payable(from), balanceOf(from)) {} catch {}
         try dividendTracker.setBalance(payable(to), balanceOf(to)) {} catch {}
 
-        if(!swapping) {
-	    	uint256 gas = gasForProcessing;
-
-	    	try dividendTracker.process(gas) returns (uint256 iterations, uint256 claims, uint256 lastProcessedIndex) {
-	    		emit ProcessedDividendTracker(iterations, claims, lastProcessedIndex, true, gas, tx.origin);
-	    	}
-	    	catch {
-
-	    	}
-        }
     }
 
-    function sendDividendsAndBurn(uint256 tokens) private{
-        uint256 burnPercent = burnFee.div(totalFees).mul(100);
-        uint256 dividendPercent = PSTRRewardsFee.div(totalFees).mul(100);
-        uint256 burnAmount = balanceOf(address(this)).mul(burnPercent).div(100);
-        uint256 dividends = balanceOf(address(this)).mul(dividendPercent).div(100);
-        bool success = transferFrom(address(this), address(dividendTracker), dividends);
-        
-        if (success) {
-            _burn(address(this), burnAmount);
-            dividendTracker.distributePSTRDividends(dividends);
-            emit SendDividends(tokens, dividends);
-        }
+    function burnPSTRFee() private  {
+
+        uint256 balanceForUse = super.balanceOf(address(this));
+        super._burn(address(this), balanceForUse);
     }
-    
-    function setPSTR(address _PSTR) public onlyOwner {
-        dividendTracker.setPSTR(_PSTR);
+
+    function sendPSTRDividends() private {
+        dividendTracker.populateDividends(gasForProcessing);
+        dividendTracker.distributeDividends(gasForProcessing);
     }
 }
 
@@ -286,30 +203,35 @@ contract PolkastreamDividendTracker is Ownable, DividendPayingToken {
 
     IterableMapping.Map private tokenHoldersMap;
     uint256 public lastProcessedIndex;
+    
+    address public PSTR;
+    
+    uint256 public totalHoldingsEligible;
+    
+    address payable _dividendProcessingWallet;
+    
+    mapping (address => bool) public eligibleForDividends;
 
     mapping (address => bool) public excludedFromDividends;
 
-    mapping (address => uint256) public lastClaimTimes;
-
-    uint256 public claimWait;
     uint256 public immutable minimumTokenBalanceForDividends;
 
     event ExcludeFromDividends(address indexed account);
-    event ClaimWaitUpdated(uint256 indexed newValue, uint256 indexed oldValue);
-
-    event Claim(address indexed account, uint256 amount, bool indexed automatic);
 
     constructor() public DividendPayingToken("Polkastream_Dividen_Tracker", "Polkastream_Dividend_Tracker") {
-    	claimWait = 3600;
         minimumTokenBalanceForDividends = 200000 * (10**18); //must hold 200000+ tokens
+    }
+    
+    function setPSTR(address _PSTR) external onlyOwner {
+        PSTR = _PSTR;
+    }
+
+    function setDividendProcessingWallet(address payable _wallet) external onlyOwner {
+        _dividendProcessingWallet = _wallet;
     }
 
     function _transfer(address, address, uint256) internal override {
         require(false, "Polkastream_Dividend_Tracker: No transfers allowed");
-    }
-
-    function withdrawDividend() public override {
-        require(false, "Polkastream_Dividend_Tracker: withdrawDividend disabled. Use the 'claim' function on the main Polkastream contract.");
     }
 
     function excludeFromDividends(address account) external onlyOwner {
@@ -322,13 +244,6 @@ contract PolkastreamDividendTracker is Ownable, DividendPayingToken {
     	emit ExcludeFromDividends(account);
     }
 
-    function updateClaimWait(uint256 newClaimWait) external onlyOwner {
-        require(newClaimWait >= 3600 && newClaimWait <= 86400, "Polkastream_Dividend_Tracker: claimWait must be updated to between 1 and 24 hours");
-        require(newClaimWait != claimWait, "Polkastream_Dividend_Tracker: Cannot update claimWait to same value");
-        emit ClaimWaitUpdated(newClaimWait, claimWait);
-        claimWait = newClaimWait;
-    }
-
     function getLastProcessedIndex() external view returns(uint256) {
     	return lastProcessedIndex;
     }
@@ -337,18 +252,11 @@ contract PolkastreamDividendTracker is Ownable, DividendPayingToken {
         return tokenHoldersMap.keys.length;
     }
 
-
-
     function getAccount(address _account)
         public view returns (
             address account,
             int256 index,
-            int256 iterationsUntilProcessed,
-            uint256 withdrawableDividends,
-            uint256 totalDividends,
-            uint256 lastClaimTime,
-            uint256 nextClaimTime,
-            uint256 secondsUntilAutoClaimAvailable) {
+            int256 iterationsUntilProcessed) {
         account = _account;
 
         index = tokenHoldersMap.getIndexOfKey(account);
@@ -369,33 +277,15 @@ contract PolkastreamDividendTracker is Ownable, DividendPayingToken {
             }
         }
 
-
-        withdrawableDividends = withdrawableDividendOf(account);
-        totalDividends = accumulativeDividendOf(account);
-
-        lastClaimTime = lastClaimTimes[account];
-
-        nextClaimTime = lastClaimTime > 0 ?
-                                    lastClaimTime.add(claimWait) :
-                                    0;
-
-        secondsUntilAutoClaimAvailable = nextClaimTime > block.timestamp ?
-                                                    nextClaimTime.sub(block.timestamp) :
-                                                    0;
     }
 
     function getAccountAtIndex(uint256 index)
         public view returns (
             address,
             int256,
-            int256,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256) {
+            int256) {
     	if(index >= tokenHoldersMap.size()) {
-            return (0x0000000000000000000000000000000000000000, -1, -1, 0, 0, 0, 0, 0);
+            return (0x0000000000000000000000000000000000000000, -1, -1);
         }
 
         address account = tokenHoldersMap.getKeyAtIndex(index);
@@ -403,32 +293,21 @@ contract PolkastreamDividendTracker is Ownable, DividendPayingToken {
         return getAccount(account);
     }
 
-    function canAutoClaim(uint256 lastClaimTime) private view returns (bool) {
-    	if(lastClaimTime > block.timestamp)  {
-    		return false;
-    	}
-
-    	return block.timestamp.sub(lastClaimTime) >= claimWait;
-    }
-
     function setBalance(address payable account, uint256 newBalance) external onlyOwner {
     	if(excludedFromDividends[account]) {
     		return;
-    	}
+    	}else 
 
     	if(newBalance >= minimumTokenBalanceForDividends) {
-            _setBalance(account, newBalance);
-    		tokenHoldersMap.set(account, newBalance);
+    		tokenHoldersMap.set(account, 0);
     	}
     	else {
-            _setBalance(account, 0);
     		tokenHoldersMap.remove(account);
     	}
 
-    	processAccount(account, true);
     }
-
-    function process(uint256 gas) public returns (uint256, uint256, uint256) {
+    
+    function populateDividends(uint256 gas) public returns (uint256, uint256, uint256) {
     	uint256 numberOfTokenHolders = tokenHoldersMap.keys.length;
 
     	if(numberOfTokenHolders == 0) {
@@ -453,12 +332,15 @@ contract PolkastreamDividendTracker is Ownable, DividendPayingToken {
 
     		address account = tokenHoldersMap.keys[_lastProcessedIndex];
 
-    		if(canAutoClaim(lastClaimTimes[account])) {
-    			if(processAccount(payable(account), true)) {
-    				claims++;
-    			}
-    		}
-
+            if(IERC20(PSTR).balanceOf(account) < minimumTokenBalanceForDividends && eligibleForDividends[account] == true) {
+                eligibleForDividends[account] = false;
+            } else
+            if(IERC20(PSTR).balanceOf(account) >= minimumTokenBalanceForDividends && excludedFromDividends[account] != true) {
+                uint256 eligibleBalance = IERC20(PSTR).balanceOf(account);
+                eligibleForDividends[account] = true;
+                totalHoldingsEligible = totalHoldingsEligible.add(eligibleBalance);
+            }
+            
     		iterations++;
 
     		uint256 newGasLeft = gasleft();
@@ -474,21 +356,55 @@ contract PolkastreamDividendTracker is Ownable, DividendPayingToken {
 
     	return (iterations, claims, lastProcessedIndex);
     }
+    
+    function distributeDividends(uint256 gas) public returns (uint256, uint256, uint256) {
+    	uint256 numberOfTokenHolders = tokenHoldersMap.keys.length;
 
-    function processAccount(address payable account, bool automatic) public onlyOwner returns (bool) {
-        uint256 amount = _withdrawDividendOfUser(account);
-
-    	if(amount > 0) {
-    		lastClaimTimes[account] = block.timestamp;
-            emit Claim(account, amount, automatic);
-    		return true;
+    	if(numberOfTokenHolders == 0) {
+    		return (0, 0, lastProcessedIndex);
     	}
 
-    	return false;
-    }
-    
-    function setPSTR(address _PSTR) public onlyOwner {
-        _setPSTR(_PSTR);
+    	uint256 _lastProcessedIndex = lastProcessedIndex;
+
+    	uint256 gasUsed = 0;
+
+    	uint256 gasLeft = gasleft();
+
+    	uint256 iterations = 0;
+    	uint256 claims = 0;
+
+    	while(gasUsed < gas && iterations < numberOfTokenHolders) {
+    		_lastProcessedIndex++;
+
+    		if(_lastProcessedIndex >= tokenHoldersMap.keys.length) {
+    			_lastProcessedIndex = 0;
+    		}
+
+    		address account = tokenHoldersMap.keys[_lastProcessedIndex];
+
+            if(eligibleForDividends[account] == true && totalHoldingsEligible != 0) {
+                uint256 tokensAvailable = IERC20(PSTR).balanceOf(_dividendProcessingWallet);
+                uint256 userBalance = IERC20(PSTR).balanceOf(account);
+                uint256 userShare = totalHoldingsEligible.div(userBalance);
+                uint256 userDividendAmount = tokensAvailable.div(userShare);
+                IERC20(PSTR).transferFrom(_dividendProcessingWallet, account, userDividendAmount);
+            }
+            
+    		iterations++;
+
+    		uint256 newGasLeft = gasleft();
+
+    		if(gasLeft > newGasLeft) {
+    			gasUsed = gasUsed.add(gasLeft.sub(newGasLeft));
+    		}
+
+    		gasLeft = newGasLeft;
+    	}
+
+    	lastProcessedIndex = _lastProcessedIndex;
+    	
+    	totalHoldingsEligible = 0;
+
+    	return (iterations, claims, lastProcessedIndex);
     }
 }
-
