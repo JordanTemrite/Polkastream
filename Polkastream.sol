@@ -25,14 +25,14 @@ contract Polkastream is ERC20, Ownable {
     address public charity = 0x15B4A30Fa9f863eC43cecf83c6d3f67e77A81925;
     
     //Locking of team & rewards wallets & vesting definitons
-    uint256 public immutable teamLockingPeriod = 180 days;
-    uint256 public rewardWalletLockingPeriod = 180 days;
-    uint256 public rewardWalletLockingExtension = 30 days;
+    uint256 public immutable teamLockingPeriod = 0 seconds;
+    uint256 public rewardWalletLockingPeriod = 0 seconds;
+    uint256 public rewardWalletLockingExtension = 30 seconds;
     uint256 public immutable lockingStartTime;
-    uint256 public immutable vestingBlock = 30 days;
+    uint256 public immutable vestingBlock = 30 seconds;
     uint256 public rewardWalletLockExtension;
     uint256 public immutable vestingPercentage = 5;
-    uint256 public immutable totalAmountVesting = 200000000 * (10**9);
+    uint256 public immutable totalAmountVesting = 200000000 * (10**18);
     uint256 public vestedAmountTransferred;
     
     //Uint's ---> By default 300k gas used for processing
@@ -40,7 +40,7 @@ contract Polkastream is ERC20, Ownable {
     uint256 public burnFee = 1;
     uint256 public totalFees = PSTRRewardsFee.add(burnFee);
     uint256 public gasForProcessing = 300000;
-    uint256 public initialSupply = 100000000000 * (10**18);
+    uint256 public initialSupply = 1000000000 * (10**18);
     uint256 public immutable maxBurnThreshold = initialSupply.div(2);
     uint256 public immutable maxTransferAmount = initialSupply.div(20);
 
@@ -130,7 +130,7 @@ contract Polkastream is ERC20, Ownable {
     
     //Returns the amount of available vested tokens to be withdrawn from the team wallet
     function totalVestedAvailable() public view returns(uint256) {
-        uint256 _monthsElapsed = (block.timestamp.sub(lockingStartTime.add(teamLockingPeriod))).div(30 days);
+        uint256 _monthsElapsed = (block.timestamp.sub(lockingStartTime.add(teamLockingPeriod))).div(30 seconds);
         uint256 _amount = (totalAmountVesting.mul(5).mul(_monthsElapsed).div(100).sub(vestedAmountTransferred));
         return _amount;
     }
@@ -229,6 +229,7 @@ contract Polkastream is ERC20, Ownable {
         if(_msgSender() == teamAndAdvisors) {
             require(isTeamUnlocked() == true, "Tokens are locked");
             require(totalVestedAvailable() != 0, "No tokens vested");
+            require(amount <= totalVestedAvailable(), "Transfers exceeds amount vested");
             vestedAmountTransferred = vestedAmountTransferred.add(amount);
         }
         
@@ -246,13 +247,13 @@ contract Polkastream is ERC20, Ownable {
         
         //If an account is not excluded from fees, requires that the transfer amount does not exceed the maximum transfer amount
         if(!_isExcludedFromFees[from]) {
-            require(amount <= maxTransferAmount, "Amount is larger than max transaction limit");
+            require(amount <= maxTransferAmount, "Amount is larger than max per transaction limit");
         }
 
         if(takeFee) {
             
             //If the maximum burn threshold has not been met, determines fee split and burns the burn fee percentage ---> transfers the dividend fee percentage to holders
-            if(totalSupply() >= maxBurnThreshold.sub(burnFee)) {
+            if(totalSupply() >= maxBurnThreshold) {
         	    uint256 fees = amount.mul(totalFees).div(100);
 
         	    amount = amount.sub(fees);
