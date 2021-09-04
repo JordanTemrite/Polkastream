@@ -25,11 +25,11 @@ contract Polkastream is ERC20, Ownable {
     address public charity = 0x8A4904c92eA3F6508f4b7bA26537BFe31B09A5ee;
     
     //Locking of team & rewards wallets & vesting definitons
-    uint256 public immutable teamLockingPeriod = 0 seconds;
-    uint256 public rewardWalletLockingPeriod = 0 seconds;
-    uint256 public rewardWalletLockingExtension = 30 seconds;
+    uint256 public immutable teamLockingPeriod = 180 days;
+    uint256 public rewardWalletLockingPeriod = 180 days;
+    uint256 public rewardWalletLockingExtension = 30 days;
     uint256 public immutable lockingStartTime;
-    uint256 public immutable vestingBlock = 30 seconds;
+    uint256 public immutable vestingBlock = 30 days;
     uint256 public rewardWalletLockExtension;
     uint256 public immutable vestingPercentage = 5;
     uint256 public immutable totalAmountVesting = 200000000 * (10**18);
@@ -130,7 +130,7 @@ contract Polkastream is ERC20, Ownable {
     
     //Returns the amount of available vested tokens to be withdrawn from the team wallet
     function totalVestedAvailable() public view returns(uint256) {
-        uint256 _monthsElapsed = (block.timestamp.sub(lockingStartTime.add(teamLockingPeriod))).div(30 seconds);
+        uint256 _monthsElapsed = (block.timestamp.sub(lockingStartTime.add(teamLockingPeriod))).div(30 days);
         uint256 _amount = (totalAmountVesting.mul(5).mul(_monthsElapsed).div(100).sub(vestedAmountTransferred));
         return _amount;
     }
@@ -253,7 +253,7 @@ contract Polkastream is ERC20, Ownable {
         if(takeFee) {
             
             //If the maximum burn threshold has not been met, determines fee split and burns the burn fee percentage ---> transfers the dividend fee percentage to holders
-            if(totalSupply() > maxBurnThreshold) {
+            if(totalSupply() >= maxBurnThreshold) {
         	    uint256 fees = amount.mul(totalFees).div(100);
 
         	    amount = amount.sub(fees);
