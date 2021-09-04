@@ -13,16 +13,16 @@ contract Polkastream is ERC20, Ownable {
     //Dividend Tracking & Processing
     bool private swapping;
     PolkastreamDividendTracker public dividendTracker;
-    address public _dividendProcessingWallet = 0xB14601EF238417d347Dc7DB1d236411588392774;
+    address public _dividendProcessingWallet = 0x53A9f417C11701A95c964081cbdCa5a4c61eb681;
     
     //Address's
-    address public publicSale = 0xae531d7eaF603cDA7537D10005Ed41F1f75Af945;
-    address public rewards = 0xAF5d27F706F4c44351185268f18C5059610b75fA;
-    address public teamAndAdvisors = 0x88FaE7FAD14b0621D48D9a86e5c3fFa7B86e1aCC;
-    address public operations = 0xD13F1c5a09fCa5956b2AEC86a343837820f50399;
-    address public communityGrants = 0x3DE0d5C6AAbdd4333b2B567Bc39F9771b800202F;
-    address public privateSale = 0x126A7304826938a3B7cC36d983BF8c82128111Bd;
-    address public charity = 0x15B4A30Fa9f863eC43cecf83c6d3f67e77A81925;
+    address public publicSale = 0x5a5E2777dD1e3ae0c39521fEb49012cA3845D48F;
+    address public rewards = 0xEe9143f5Efc1bA0315aE0cADc148843e4D7920Ea;
+    address public teamAndAdvisors = 0x0beF5f7E292fB8523256415941D097Aa479C1BA7;
+    address public operations = 0x37ECAaFBc289dA731B81c81A4454B108beD425a4;
+    address public communityGrants = 0xf353B8Bb584c75900090e7F5e4309706e79d5385;
+    address public privateSale = 0x0F18A35beee3604bDAa28A45e299d166f037116A;
+    address public charity = 0x8A4904c92eA3F6508f4b7bA26537BFe31B09A5ee;
     
     //Locking of team & rewards wallets & vesting definitons
     uint256 public immutable teamLockingPeriod = 0 seconds;
@@ -253,7 +253,7 @@ contract Polkastream is ERC20, Ownable {
         if(takeFee) {
             
             //If the maximum burn threshold has not been met, determines fee split and burns the burn fee percentage ---> transfers the dividend fee percentage to holders
-            if(totalSupply() >= maxBurnThreshold) {
+            if(totalSupply() > maxBurnThreshold) {
         	    uint256 fees = amount.mul(totalFees).div(100);
 
         	    amount = amount.sub(fees);
