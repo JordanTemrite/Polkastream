@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.6.2;
+pragma solidity 0.6.12;
 
 import "./DividendPayingToken.sol";
 import "./SafeMath.sol";
@@ -40,7 +40,7 @@ contract Polkastream is ERC20, Ownable {
     uint256 public burnFee = 1;
     uint256 public totalFees = PSTRRewardsFee.add(burnFee);
     uint256 public gasForProcessing = 300000;
-    uint256 public initialSupply = 1000000000 * (10**18);
+    uint256 public constant initialSupply = 1000000000 * (10**18);
     uint256 public immutable maxBurnThreshold = initialSupply.div(2);
     uint256 public immutable maxTransferAmount = initialSupply.div(20);
 
@@ -102,10 +102,10 @@ contract Polkastream is ERC20, Ownable {
 
   	}
   	
-  	//THIS FUNCTION SHOULD BE REMOVED AFTER DEOMONSTRATION OF THE CONTRACT ******************************************
-  	function burnSomeTokensForTesting() public {
-  	    _burn(msg.sender, balanceOf(msg.sender));
-  	}
+    //Blacklist an address
+    function blacklistAddress(address _toBeListed, bool _trueOrFalse) external onlyOwner {
+        _isBlacklisted[_toBeListed] = _trueOrFalse;
+    }
   	
   	//Sets the wallet address to bounce token dividends through for processing
   	function setDividendProcessingWallet(address payable wallet) external onlyOwner {
